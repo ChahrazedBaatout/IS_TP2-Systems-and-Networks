@@ -6,6 +6,8 @@
 #define INITIAL_VALUE 0
 #define RETURN_OK 1
 #define RETURN_KO 0
+#define PREALLOC_MULTIPLIER 4
+#define PREALLOC_MIN_SIZE 1024
 
 typedef struct HEADER_TAG {
     struct HEADER_TAG *ptr_next;
@@ -78,13 +80,17 @@ static HEADER *find_suitable_block(size_t size, HEADER **prev_out) {
 }
 
 static HEADER *allocate_new_block(size_t size) {
-    size_t total_size = sizeof(HEADER) + size + sizeof(long);
+    size_t user_size = size * PREALLOC_MULTIPLIER;
+    if (user_size < PREALLOC_MIN_SIZE) {
+        user_size = PREALLOC_MIN_SIZE;
+    }
+    size_t total_size = sizeof(HEADER) + user_size + sizeof(long);
     void *mem = sbrk(total_size);
     if (mem == (void *) -1) {
         return NULL;
     }
     HEADER *header = mem;
-    header->bloc_size = size;
+    header->bloc_size = user_size;
     header->magic_number = MAGIC_NUMBER;
     header->ptr_next = NULL;
     return header;
@@ -104,7 +110,7 @@ static HEADER *split_block(HEADER *block, size_t size) {
     size_t total_size = sizeof(HEADER) + size + sizeof(long);
     if (block->bloc_size > size + sizeof(HEADER) + sizeof(long)) {
         HEADER *new_block = (void *) block + total_size;
-        new_block->bloc_size = block->bloc_size - total_size;
+        new_block->bloc_size = block->bloc_size - size - sizeof(HEADER) - sizeof(long);
         new_block->magic_number = MAGIC_NUMBER;
         new_block->ptr_next = NULL;
         block->bloc_size = size;
@@ -114,30 +120,42 @@ static HEADER *split_block(HEADER *block, size_t size) {
 }
 
 void *malloc_3is(size_t size) {
+    if (size == 0) {
+        return NULL;
+    }
     HEADER *prev = NULL;
     HEADER *block = find_suitable_block(size, &prev);
-    if (block) {
+    int is_new = 0;
+    if (!block) {
+        block = allocate_new_block(size);
+        if (!block) {
+            return NULL;
+        }
+        is_new = 1;
+    }
+
+    if (!is_new) {
         if (prev) {
             prev->ptr_next = block->ptr_next;
         } else {
             free_list = block->ptr_next;
         }
-        HEADER *remaining = split_block(block, size);
-        if (remaining) {
-            insert_block_sorted(remaining);
-        }
-        return prepare_block_for_use(block, size);
     }
-    block = allocate_new_block(size);
-    if (!block) {
-        return NULL;
+    HEADER *remaining = split_block(block, size);
+    size_t user_size = size;
+    if (remaining) {
+        insert_block_sorted(remaining);
+    } else {
+        user_size = block->bloc_size;
     }
-    return prepare_block_for_use(block, size);
+
+    return prepare_block_for_use(block, user_size);
 }
 
 void free_3is(void *ptr) {
     if (!ptr) {
         FREE_ERROR += 1;
+        return;
     }
 
     HEADER *header = ptr - sizeof(HEADER);
@@ -190,8 +208,19 @@ int main() {
     printf("h: %s\n", h);
     free_3is(h);
 
+    printf("\n-- ** Test 7 ** Preallocation of memory --\n");
+    printf("Allocating multiple small blocks to test preallocation efficiency.\n");
+    for (int i = 0; i < 20; i++) {
+        char *p = malloc_3is(16);
+        if (p) {
+            snprintf(p, 16, "Test %d", i);
+            printf("Allocated small block %d: %s\n", i, p);
+        }
+        free_3is(p);
+    }
+    printf("Preallocation should reduce the number of sbrk calls for small allocations.\n");
 
-    printf("\n** Test Summary **s\n");
+    printf("\n** Test Summary **\n");
     printf("Total memory errors detected: %d\n", FREE_ERROR);
     printf("GREAT.\n");
 
