@@ -2,6 +2,9 @@
 #include <stdio.h>
 
 #define MAGIC_NUMBER 0x0123456789ABCDEFL
+#define INITIAL_VALUE 0
+#define RETURN_OK 1
+#define RETURN_KO 0
 
 typedef struct HEADER_TAG {
     struct HEADER_TAG *ptr_next;
@@ -11,7 +14,7 @@ typedef struct HEADER_TAG {
 
 HEADER *free_list = NULL;
 
-int FREE_ERROR = 0;
+int FREE_ERROR = INITIAL_VALUE;
 
 void set_magic_number(HEADER *header, void *ptr) {
     long *post_magic = ptr + header->bloc_size;
@@ -21,9 +24,9 @@ void set_magic_number(HEADER *header, void *ptr) {
 static int verify_magic_numbers(HEADER *header, void *ptr) {
     long *post_magic = ptr + header->bloc_size;
     if (header->magic_number != MAGIC_NUMBER || *post_magic != MAGIC_NUMBER) {
-        return 0;
+        return RETURN_KO;
     }
-    return 1;
+    return RETURN_OK;
 }
 
 static void merge_free_blocks() {
