@@ -26,19 +26,32 @@ static int verify_magic_numbers(HEADER *header, void *ptr) {
     return 1;
 }
 
+static void merge_free_blocks() {
+    HEADER *current = free_list;
+    while (current && current->ptr_next) {
+        void *end_current = (void *) current + sizeof(HEADER) + current->bloc_size + sizeof(long);
+        if (end_current == (void *) current->ptr_next) {
+            current->bloc_size += sizeof(HEADER) + current->ptr_next->bloc_size + sizeof(long);
+            current->ptr_next = current->ptr_next->ptr_next;
+        } else {
+            current = current->ptr_next;
+        }
+    }
+}
+
 static void insert_block_sorted(HEADER *header) {
     if (free_list == NULL || header < free_list) {
         header->ptr_next = free_list;
         free_list = header;
-        return;
+    } else {
+        HEADER *current = free_list;
+        while (current->ptr_next && current->ptr_next < header) {
+            current = current->ptr_next;
+        }
+        header->ptr_next = current->ptr_next;
+        current->ptr_next = header;
     }
-
-    HEADER *current = free_list;
-    while (current->ptr_next && current->ptr_next < header) {
-        current = current->ptr_next;
-    }
-    header->ptr_next = current->ptr_next;
-    current->ptr_next = header;
+    merge_free_blocks();
 }
 
 static HEADER *find_suitable_block(size_t size, HEADER **prev_out) {
@@ -63,7 +76,7 @@ static HEADER *find_suitable_block(size_t size, HEADER **prev_out) {
 static HEADER *allocate_new_block(size_t size) {
     size_t total_size = sizeof(HEADER) + size + sizeof(long);
     void *mem = sbrk(total_size);
-    if (mem == (void *)-1) {
+    if (mem == (void *) -1) {
         return NULL;
     }
     HEADER *header = mem;
@@ -133,44 +146,25 @@ void free_3is(void *ptr) {
 }
 
 int main() {
-    void *a = malloc_3is(32);
-    void *b = malloc_3is(64);
-    void *c = malloc_3is(128);
+    void *aa = malloc_3is(32);
+    void *bb = malloc_3is(64);
+    void *cc = malloc_3is(128);
 
-    printf("Allocations faites : a=%p, b=%p, c=%p\n", a, b, c);
+    printf("a=%p, b=%p, c=%p\n", aa, bb, cc);
 
-    free_3is(b);
+    free_3is(aa);
+    free_3is(bb);
+    free_3is(cc);
 
-    if (free_list)
-        printf("Premier bloc libre : %p (taille %zu)\n", (void *)free_list, free_list->bloc_size);
+    if (free_list && free_list->bloc_size >= 32 + 64 + 128)
+        printf("Fusion réussie: bloc libre total=%zu\n", free_list->bloc_size);
     else
-        printf("Aucun bloc libre.\n");
+        printf("Fusion échouée\n");
 
-    void *d = malloc_3is(50);
-    printf("Nouvelle allocation d = %p\n", d);
+    // Test d'erreur
+    free_3is(NULL);
+    free_3is((void *)0x1234); // pointeur invalide
 
-    if (d == b)
-        printf("Bloc réutilisé avec succès !\n");
-    else
-        printf("Bloc non réutilisé (nouvelle zone allouée)\n");
-
-    void *x = malloc_3is(40);
-    void *y = malloc_3is(80);
-
-    printf("Test: x=%p, y=%p\n", x, y);
-
-    free_3is(x);
-    void *z = malloc_3is(32);
-
-    printf("Réallocation z=%p\n", z);
-
-    if (z == x)
-        printf("Test réussi: bloc réutilisé\n");
-    else
-        printf("Test échoué: nouvelle zone allouée\n");
-
-    free_3is(y);
-    free_3is(z);
 
     if (FREE_ERROR > 0) {
         printf("Nombre de FREE_ERROR : %d\n", FREE_ERROR);
