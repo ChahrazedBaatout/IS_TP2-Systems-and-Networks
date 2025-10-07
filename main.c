@@ -101,7 +101,7 @@ static void *prepare_block_for_use(HEADER *block, size_t size) {
 
 static HEADER *split_block(HEADER *block, size_t size) {
     size_t total_size = sizeof(HEADER) + size + sizeof(long);
-    if (block->bloc_size > total_size + sizeof(HEADER) + sizeof(long)) {
+    if (block->bloc_size > size + sizeof(HEADER) + sizeof(long)) {
         HEADER *new_block = (void *) block + total_size;
         new_block->bloc_size = block->bloc_size - total_size;
         new_block->magic_number = MAGIC_NUMBER;
