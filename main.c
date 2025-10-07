@@ -119,7 +119,7 @@ static HEADER *split_block(HEADER *block, size_t size) {
     return NULL;
 }
 
-void *malloc_3is(size_t size) {
+void *malloc(size_t size) {
     if (size == 0) {
         return NULL;
     }
@@ -152,7 +152,7 @@ void *malloc_3is(size_t size) {
     return prepare_block_for_use(block, user_size);
 }
 
-void free_3is(void *ptr) {
+void free(void *ptr) {
     if (!ptr) {
         FREE_ERROR += 1;
         return;
@@ -171,52 +171,52 @@ int main() {
     printf("***Secure Memory Allocator ***Full Test \n\n");
 
     printf("-- **Test 1** Basic allocations --\n");
-    char *a = malloc_3is(20);
+    char *a = malloc(20);
     strcpy(a, "Block A");
-    char *b = malloc_3is(40);
+    char *b = malloc(40);
     strcpy(b, "Block B with more data");
-    char *c = malloc_3is(60);
+    char *c = malloc(60);
     strcpy(c, "Block C is the biggest one");
     printf("a: %s\nb: %s\nc: %s\n", a, b, c);
 
     printf("\n-- ** Test 2 ** Freeing and merging adjacent blocks --\n");
-    free_3is(b);
-    free_3is(a);
-    free_3is(c);
+    free(b);
+    free(a);
+    free(c);
 
     printf("\n-- ** Test 3** Reusing and splitting freed blocks --\n");
-    char *d = malloc_3is(10);
+    char *d = malloc(10);
     strcpy(d, "Reuse");
-    char *e = malloc_3is(30);
+    char *e = malloc(30);
     strcpy(e, "Another block reuse");
     printf("d: %s\ne: %s\n", d, e);
 
     printf("\n-- ** Test 4**  Buffer overflow detection --\n");
-    char *f = malloc_3is(10);
+    char *f = malloc(10);
     strcpy(f, "This string is too long!");
-    free_3is(f);
+    free(f);
 
     printf("\n-- **Test 5 ** Freeing a NULL pointer --\n");
-    free_3is(NULL);
+    free(NULL);
 
     printf("\n-- ** Test 6 ** Multiple allocations and frees for recycling --\n");
-    char *g = malloc_3is(25);
+    char *g = malloc(25);
     strcpy(g, "Recycling test");
-    free_3is(g);
-    char *h = malloc_3is(20);
+    free(g);
+    char *h = malloc(20);
     strcpy(h, "Smaller reuse");
     printf("h: %s\n", h);
-    free_3is(h);
+    free(h);
 
     printf("\n-- ** Test 7 ** Preallocation of memory --\n");
     printf("Allocating multiple small blocks to test preallocation efficiency.\n");
     for (int i = 0; i < 20; i++) {
-        char *p = malloc_3is(16);
+        char *p = malloc(16);
         if (p) {
             snprintf(p, 16, "Test %d", i);
             printf("Allocated small block %d: %s\n", i, p);
         }
-        free_3is(p);
+        free(p);
     }
     printf("Preallocation should reduce the number of sbrk calls for small allocations.\n");
 
