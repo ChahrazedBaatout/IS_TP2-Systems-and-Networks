@@ -1,103 +1,41 @@
-#include <stdio.h>
 #include <unistd.h>
+#include <stdio.h>
 #include <string.h>
-#include <stdint.h>
 
 #define MAGIC_NUMBER 0x0123456789ABCDEFL
-int memory_error_count;
+#define INITIAL_VALUE 0
+#define RETURN_OK 1
+#define RETURN_KO 0
+
 typedef struct HEADER_TAG {
     struct HEADER_TAG *ptr_next;
     size_t bloc_size;
     long magic_number;
 } HEADER;
 
+HEADER *free_list = NULL;
 
-static HEADER *free_list = NULL;
+int FREE_ERROR = INITIAL_VALUE;
 
-void* malloc_3is(size_t size) {
-    HEADER *prev = NULL;
-    HEADER *current = free_list;
-
-    while (current) {
-        if (current->bloc_size >= size) {
-            if (prev)
-                prev->ptr_next = current->ptr_next;
-            else
-                free_list = current->ptr_next;
-
-            current->ptr_next = NULL;
-            current->magic_number = MAGIC_NUMBER;
-
-            long *start_guard = (long*)((char*)current + sizeof(HEADER));
-            *start_guard = MAGIC_NUMBER;
-
-            long *end_guard = (long*)((char*)start_guard + sizeof(long) + size);
-            *end_guard = MAGIC_NUMBER;
-
-            return (void*)((char*)current + sizeof(HEADER) + sizeof(long));
-        }
-
-        prev = current;
-        current = current->ptr_next;
-    }
-
-    //   Use `sbrk()` to expand the heap
-    void *new_block = sbrk(sizeof(HEADER) + sizeof(long)*2 + size);
-    if (new_block == (void*)-1) {
-        perror("sbrk failed");
-        return NULL;
-    }
-
-    HEADER *h = (HEADER*)new_block;
-    h->ptr_next = NULL;
-    h->bloc_size = size;
-    h->magic_number = MAGIC_NUMBER;
-
-    long *start_guard = (long*)((char*)h + sizeof(HEADER));
-    *start_guard = MAGIC_NUMBER;
-
-    long *end_guard = (long*)((char*)start_guard + sizeof(long) + size);
-    *end_guard = MAGIC_NUMBER;
-
-    return (void*)((char*)h + sizeof(HEADER) + sizeof(long));
+void set_magic_number(HEADER *header, void *ptr) {
+    long *post_magic = ptr + header->bloc_size;
+    *post_magic = MAGIC_NUMBER;
 }
 
-void free_3is(void *ptr) {
-    if (ptr == NULL) {
-        memory_error_count++;
-        return;
+static int verify_magic_numbers(HEADER *header, void *ptr) {
+    long *post_magic = ptr + header->bloc_size;
+    if (header->magic_number != MAGIC_NUMBER || *post_magic != MAGIC_NUMBER) {
+        return RETURN_KO;
     }
+    return RETURN_OK;
+}
 
-    HEADER *h = (HEADER*)((char*)ptr - sizeof(HEADER) - sizeof(long));
-
-    long *start_guard = (long*)((char*)h + sizeof(HEADER));
-    long *end_guard = (long*)((char*)start_guard + sizeof(long) + h->bloc_size);
-    //memory corruption
-    if (*start_guard != MAGIC_NUMBER || *end_guard != MAGIC_NUMBER) {
-        memory_error_count++;
-        return;
-    }
-
-    //Insert the freed block into the free list, keeping the list sorted by memory address
-
-    if (!free_list || h < free_list) {
-        h->ptr_next = free_list;
-        free_list = h;
-    } else {
-        HEADER *current = free_list;
-        while (current->ptr_next && current->ptr_next < h)
-            current = current->ptr_next;
-
-        h->ptr_next = current->ptr_next;
-        current->ptr_next = h;
-    }
-
-    // merge adjacent free memory
+static void merge_free_blocks() {
     HEADER *current = free_list;
     while (current && current->ptr_next) {
-        char *end_current = (char*)current + sizeof(HEADER) + sizeof(long) + current->bloc_size + sizeof(long);
-        if (end_current == (char*)current->ptr_next) {
-            current->bloc_size += sizeof(HEADER) + sizeof(long)*2 + current->ptr_next->bloc_size;
+        void *end_current = (void *) current + sizeof(HEADER) + current->bloc_size + sizeof(long);
+        if (end_current == (void *) current->ptr_next) {
+            current->bloc_size += sizeof(HEADER) + current->ptr_next->bloc_size + sizeof(long);
             current->ptr_next = current->ptr_next->ptr_next;
         } else {
             current = current->ptr_next;
@@ -105,7 +43,111 @@ void free_3is(void *ptr) {
     }
 }
 
+static void insert_block_sorted(HEADER *header) {
+    if (free_list == NULL || header < free_list) {
+        header->ptr_next = free_list;
+        free_list = header;
+    } else {
+        HEADER *current = free_list;
+        while (current->ptr_next && current->ptr_next < header) {
+            current = current->ptr_next;
+        }
+        header->ptr_next = current->ptr_next;
+        current->ptr_next = header;
+    }
+    merge_free_blocks();
+}
 
+static HEADER *find_suitable_block(size_t size, HEADER **prev_out) {
+    HEADER *prev = NULL;
+    HEADER *current = free_list;
+    while (current) {
+        if (current->bloc_size >= size) {
+            if (prev_out) {
+                *prev_out = prev;
+            }
+            return current;
+        }
+        prev = current;
+        current = current->ptr_next;
+    }
+    if (prev_out) {
+        *prev_out = NULL;
+    }
+    return NULL;
+}
+
+static HEADER *allocate_new_block(size_t size) {
+    size_t total_size = sizeof(HEADER) + size + sizeof(long);
+    void *mem = sbrk(total_size);
+    if (mem == (void *) -1) {
+        return NULL;
+    }
+    HEADER *header = mem;
+    header->bloc_size = size;
+    header->magic_number = MAGIC_NUMBER;
+    header->ptr_next = NULL;
+    return header;
+}
+
+static void *prepare_block_for_use(HEADER *block, size_t size) {
+    block->magic_number = MAGIC_NUMBER;
+    block->bloc_size = size;
+    block->ptr_next = NULL;
+
+    void *user_ptr = (void *) block + sizeof(HEADER);
+    set_magic_number(block, user_ptr);
+    return user_ptr;
+}
+
+static HEADER *split_block(HEADER *block, size_t size) {
+    size_t total_size = sizeof(HEADER) + size + sizeof(long);
+    if (block->bloc_size > size + sizeof(HEADER) + sizeof(long)) {
+        HEADER *new_block = (void *) block + total_size;
+        new_block->bloc_size = block->bloc_size - total_size;
+        new_block->magic_number = MAGIC_NUMBER;
+        new_block->ptr_next = NULL;
+        block->bloc_size = size;
+        return new_block;
+    }
+    return NULL;
+}
+
+void *malloc_3is(size_t size) {
+    HEADER *prev = NULL;
+    HEADER *block = find_suitable_block(size, &prev);
+    if (block) {
+        if (prev) {
+            prev->ptr_next = block->ptr_next;
+        } else {
+            free_list = block->ptr_next;
+        }
+        HEADER *remaining = split_block(block, size);
+        if (remaining) {
+            insert_block_sorted(remaining);
+        }
+        return prepare_block_for_use(block, size);
+    }
+    block = allocate_new_block(size);
+    if (!block) {
+        return NULL;
+    }
+    return prepare_block_for_use(block, size);
+}
+
+void free_3is(void *ptr) {
+    if (!ptr) {
+        FREE_ERROR += 1;
+    }
+
+    HEADER *header = ptr - sizeof(HEADER);
+
+    if (verify_magic_numbers(header, ptr)) {
+        insert_block_sorted(header);
+    } else {
+        FREE_ERROR += 1;
+    }
+}
 
 int main() {
     printf("***Secure Memory Allocator ***Full Test \n\n");
@@ -150,7 +192,7 @@ int main() {
 
 
     printf("\n** Test Summary **s\n");
-    printf("Total memory errors detected: %d\n", memory_error_count);
+    printf("Total memory errors detected: %d\n", FREE_ERROR);
     printf("GREAT.\n");
 
     return 0;
