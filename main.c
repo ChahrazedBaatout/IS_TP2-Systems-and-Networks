@@ -39,21 +39,66 @@ static void insert_block_sorted(HEADER *header) {
     current->ptr_next = header;
 }
 
-void *malloc_3is(size_t size) {
+static HEADER *find_suitable_block(size_t size, HEADER **prev_out) {
+    HEADER *prev = NULL;
+    HEADER *current = free_list;
+    while (current) {
+        if (current->bloc_size >= size) {
+            if (prev_out) {
+                *prev_out = prev;
+            }
+            return current;
+        }
+        prev = current;
+        current = current->ptr_next;
+    }
+    if (prev_out) {
+        *prev_out = NULL;
+    }
+    return NULL;
+}
+
+static HEADER *allocate_new_block(size_t size) {
     size_t total_size = sizeof(HEADER) + size + sizeof(long);
-
-
     void *mem = sbrk(total_size);
-    if (mem == (void *) -1) {
+    if (mem == (void *)-1) {
+        perror("sbrk");
         return NULL;
     }
-    HEADER *header = (HEADER *) mem;
+    HEADER *header = (HEADER *)mem;
     header->bloc_size = size;
     header->magic_number = MAGIC_NUMBER;
     header->ptr_next = NULL;
-    void *user_ptr = (char *) header + sizeof(HEADER);
-    set_magic_number(header, user_ptr);
+    return header;
+}
+
+static void *prepare_block_for_use(HEADER *block, size_t size) {
+    block->magic_number = MAGIC_NUMBER;
+    block->bloc_size = size;
+    block->ptr_next = NULL;
+
+    void *user_ptr = (char *)block + sizeof(HEADER);
+    set_magic_number(block, user_ptr);
     return user_ptr;
+}
+
+void *malloc_3is(size_t size) {
+    HEADER *prev = NULL;
+    HEADER *block = find_suitable_block(size, &prev);
+    if (block) {
+        if (prev) {
+            prev->ptr_next = block->ptr_next;
+        }
+        else {
+            free_list = block->ptr_next;
+        }
+        return prepare_block_for_use(block, size);
+    }
+    block = allocate_new_block(size);
+    if (!block) {
+        return NULL;
+    }
+    return prepare_block_for_use(block, size);
 }
 
 void free_3is(void *ptr) {
@@ -84,5 +129,12 @@ int main() {
     else
         printf("Aucun bloc libre.\n");
 
+    void *d = malloc_3is(50);
+    printf("Nouvelle allocation d = %p\n", d);
+
+    if (d == b)
+        printf("Bloc réutilisé avec succès !\n");
+    else
+        printf("Bloc non réutilisé (nouvelle zone allouée)\n");
     return 0;
 }
