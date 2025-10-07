@@ -3,4 +3,5 @@ project(TP2_IS_OS C)
 
 set(CMAKE_C_STANDARD 11)
 
-add_executable(TP2_IS_OS main.c)
+add_executable(TP2_IS_OS main.c
+)
