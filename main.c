@@ -83,6 +83,19 @@ static void *prepare_block_for_use(HEADER *block, size_t size) {
     return user_ptr;
 }
 
+static HEADER *split_block(HEADER *block, size_t size) {
+    size_t total_size = sizeof(HEADER) + size + sizeof(long);
+    if (block->bloc_size > total_size + sizeof(HEADER) + sizeof(long)) {
+        HEADER *new_block = (void *) block + total_size;
+        new_block->bloc_size = block->bloc_size - total_size;
+        new_block->magic_number = MAGIC_NUMBER;
+        new_block->ptr_next = NULL;
+        block->bloc_size = size;
+        return new_block;
+    }
+    return NULL;
+}
+
 void *malloc_3is(size_t size) {
     HEADER *prev = NULL;
     HEADER *block = find_suitable_block(size, &prev);
@@ -91,6 +104,10 @@ void *malloc_3is(size_t size) {
             prev->ptr_next = block->ptr_next;
         } else {
             free_list = block->ptr_next;
+        }
+        HEADER *remaining = split_block(block, size);
+        if (remaining) {
+            insert_block_sorted(remaining);
         }
         return prepare_block_for_use(block, size);
     }
@@ -136,6 +153,24 @@ int main() {
         printf("Bloc réutilisé avec succès !\n");
     else
         printf("Bloc non réutilisé (nouvelle zone allouée)\n");
+
+    void *x = malloc_3is(40);
+    void *y = malloc_3is(80);
+
+    printf("Test: x=%p, y=%p\n", x, y);
+
+    free_3is(x);
+    void *z = malloc_3is(32);
+
+    printf("Réallocation z=%p\n", z);
+
+    if (z == x)
+        printf("Test réussi: bloc réutilisé\n");
+    else
+        printf("Test échoué: nouvelle zone allouée\n");
+
+    free_3is(y);
+    free_3is(z);
 
     if (FREE_ERROR > 0) {
         printf("Nombre de FREE_ERROR : %d\n", FREE_ERROR);
